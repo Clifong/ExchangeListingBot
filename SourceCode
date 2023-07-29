@@ -1,51 +1,86 @@
 package main
 
 import (
-	"encoding/json"
-	"flag"
+	"context"
 	"fmt"
-	"io/ioutil"
-	"net/http"
+	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
+	"github.com/adshao/go-binance/v2"
 	"github.com/bwmarrin/discordgo"
 )
 
-// Variables used for command line parameters
+const (
+	channelId = "1107583747114672158"
+)
+
 var (
 	Token string
 )
 
-const KuteGoAPIURL = "localhost:8080"
-
-func init() {
-	flag.StringVar(&Token, "t", "", "Bot Token")
-	flag.Parse()
-}
-
 func main() {
+
+	var (
+		// apiKey    = os.Getenv("BINANCE_API_KEY")
+		// secretKey = os.Getenv("BINANCE_SECRET_KEY")
+		apiKey    = ""
+		secretKey = ""
+	)
 
 	// Create a new Discord session using the provided bot token.
 	dg, err := discordgo.New("Bot " + Token)
 	if err != nil {
-		fmt.Println("error creating Discord session,", err)
+		log.Fatal("error creating Discord session,", err)
 		return
 	}
-
-	// Register the messageCreate func as a callback for MessageCreate events.
-	dg.AddHandler(messageCreate)
-
-	// In this example, we only care about receiving message events.
-	dg.Identify.Intents = discordgo.IntentsGuildMessages
 
 	// Open a websocket connection to Discord and begin listening.
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("error opening connection,", err)
-		return
+		log.Fatal("error opening connection,", err)
+	}
+	defer dg.Close()
+
+	client := binance.NewClient(apiKey, secretKey)
+
+	res, err := client.NewExchangeInfoService().Symbols().Do(context.Background())
+	if err != nil {
+		log.Fatal("Could not get new coins from client")
+	}
+
+	for _, e := range res.Symbols {
+		embed := &discordgo.MessageEmbed{
+			Author: &discordgo.MessageEmbedAuthor{},
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Symbol",
+					Value:  e.Symbol,
+					Inline: false,
+				},
+
+				{
+					Name:   "Status",
+					Value:  e.Status,
+					Inline: false,
+				},
+
+				{
+					Name:   "Base asset",
+					Value:  e.BaseAsset,
+					Inline: false,
+				},
+
+				{
+					Name:   "Quote asset",
+					Value:  e.QuoteAsset,
+					Inline: false,
+				},
+			},
+		}
+		fmt.Printf("%s %s %s %s\n", e.Symbol, e.Status, e.BaseAsset, e.QuoteAsset)
+		dg.ChannelMessageSendEmbed(channelId, embed)
 	}
 
 	// Wait here until CTRL-C or other term signal is received.
@@ -56,99 +91,4 @@ func main() {
 
 	// Cleanly close down the Discord session.
 	dg.Close()
-}
-
-type Gopher struct {
-	Name string `json: "name"`
-}
-
-// This function will be called (due to AddHandler above) every time a new
-// message is created on any channel that the authenticated bot has access to.
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-
-	//m is the m
-
-	// Ignore all messages created by the bot itself
-	// This isn't required in this specific example but it's a good practice.
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-
-	if m.Content == "!gopher" {
-
-		//Call the KuteGo API and retrieve our cute Dr Who Gopher
-		response, err := http.Get(KuteGoAPIURL + "/gopher/" + "dr-who")
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer response.Body.Close()
-
-		if response.StatusCode == 200 {
-			_, err = s.ChannelFileSend(m.ChannelID, "dr-who.png", response.Body)
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else {
-			fmt.Println("Error: Can't get dr-who Gopher! :-(")
-		}
-	}
-
-	if m.Content == "!random" {
-
-		//Call the KuteGo API and retrieve a random Gopher
-		response, err := http.Get(KuteGoAPIURL + "/gopher/random/")
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer response.Body.Close()
-
-		if response.StatusCode == 200 {
-			_, err = s.ChannelFileSend(m.ChannelID, "random-gopher.png", response.Body)
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else {
-			fmt.Println("Error: Can't get random Gopher! :-(")
-		}
-	}
-
-	if m.Content == "!gophers" {
-
-		//Call the KuteGo API and display the list of available Gophers
-		response, err := http.Get(KuteGoAPIURL + "/gophers/")
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer response.Body.Close()
-
-		if response.StatusCode == 200 {
-			// Transform our response to a []byte
-			body, err := ioutil.ReadAll(response.Body)
-			if err != nil {
-				fmt.Println(err)
-			}
-
-			// Put only needed informations of the JSON document in our array of Gopher
-			var data []Gopher
-			err = json.Unmarshal(body, &data)
-			if err != nil {
-				fmt.Println(err)
-			}
-
-			// Create a string with all of the Gopher's name and a blank line as separator
-			//strings.Builder is a way to concantenate strings
-			var gophers strings.Builder
-			for _, gopher := range data {
-				gophers.WriteString(gopher.Name + "\n")
-			}
-
-			// Send a text message with the list of Gophers
-			_, err = s.ChannelMessageSend(m.ChannelID, gophers.String())
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else {
-			fmt.Println("Error: Can't get list of Gophers! :-(")
-		}
-	}
 }
